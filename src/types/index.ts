@@ -66,4 +66,5 @@ export interface NostrIdentity {
   publicKeyHex: string;
   npub: string;
   nsec: string;
+  fingerprint: string;
 }

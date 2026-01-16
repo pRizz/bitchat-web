@@ -147,6 +147,7 @@ class KeyManager {
       publicKeyHex,
       npub: bech32Encode('npub', publicKey),
       nsec: bech32Encode('nsec', privateKey),
+      fingerprint: formatFingerprint(publicKeyHex),
     };
   }
 
@@ -212,6 +213,16 @@ class KeyManager {
     const existing = await this.db!.get(STORE_NAME, NOSTR_IDENTITY_ID);
     return existing !== undefined;
   }
+}
+
+/**
+ * Format a public key hex string as a human-readable fingerprint.
+ * Uses first 16 hex characters, grouped in 4s (matches iOS format).
+ * Example: "A1B2 C3D4 E5F6 G7H8"
+ */
+function formatFingerprint(publicKeyHex: string): string {
+  const prefix = publicKeyHex.slice(0, 16).toUpperCase();
+  return prefix.match(/.{1,4}/g)?.join(' ') ?? prefix;
 }
 
 // Bech32 encoding/decoding for Nostr keys (npub/nsec)
