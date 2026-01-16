@@ -1,7 +1,12 @@
 /**
- * NostrProtocol - NIP-17/NIP-44/NIP-59 implementation
+ * NostrProtocol - NIP-04/NIP-17/NIP-44/NIP-59 implementation
  *
  * Provides private messaging with gift wrapping for BitChat Web.
+ * - NIP-04: Legacy encrypted DMs (AES-256-CBC)
+ * - NIP-17: Modern gift-wrapped private messages
+ * - NIP-44: XChaCha20-Poly1305 encryption
+ * - NIP-59: Gift wrapping
+ *
  * Matches the Swift implementation in NostrProtocol.swift.
  */
 
@@ -118,6 +123,132 @@ export class NostrProtocol {
     });
 
     return event.sign(senderIdentity.privateKey);
+  }
+
+  // MARK: - NIP-04 Legacy DMs
+
+  /**
+   * Create a NIP-04 encrypted DM (kind 4)
+   * Legacy format for compatibility with older clients
+   */
+  static async createNIP04Message(
+    content: string,
+    recipientPubkey: string,
+    senderIdentity: NostrIdentity
+  ): Promise<NostrEvent> {
+    const encrypted = await this.nip04Encrypt(
+      content,
+      recipientPubkey,
+      senderIdentity.privateKey
+    );
+
+    const event = new NostrEvent({
+      pubkey: senderIdentity.publicKeyHex,
+      createdAt: new Date(),
+      kind: NostrEventKind.EncryptedDM,
+      tags: [['p', recipientPubkey]],
+      content: encrypted,
+    });
+
+    return event.sign(senderIdentity.privateKey);
+  }
+
+  /**
+   * Decrypt a NIP-04 encrypted DM (kind 4)
+   */
+  static async decryptNIP04Message(
+    event: NostrEvent,
+    recipientIdentity: NostrIdentity
+  ): Promise<{ content: string; senderPubkey: string; timestamp: number }> {
+    const content = await this.nip04Decrypt(
+      event.content,
+      event.pubkey,
+      recipientIdentity.privateKey
+    );
+
+    return {
+      content,
+      senderPubkey: event.pubkey,
+      timestamp: event.created_at,
+    };
+  }
+
+  /**
+   * NIP-04 encryption using AES-256-CBC
+   * Format: base64(ciphertext) + "?iv=" + base64(iv)
+   */
+  static async nip04Encrypt(
+    plaintext: string,
+    recipientPubkey: string,
+    senderPrivateKey: Uint8Array
+  ): Promise<string> {
+    const recipientPubkeyData = hexToBytes(recipientPubkey);
+    const sharedSecret = this.deriveSharedSecret(senderPrivateKey, recipientPubkeyData);
+
+    // AES-256-CBC with 16-byte IV
+    const iv = crypto.getRandomValues(new Uint8Array(16));
+    const key = await crypto.subtle.importKey(
+      'raw',
+      sharedSecret.buffer as ArrayBuffer,
+      { name: 'AES-CBC' },
+      false,
+      ['encrypt']
+    );
+
+    const plaintextBytes = new TextEncoder().encode(plaintext);
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: 'AES-CBC', iv },
+      key,
+      plaintextBytes
+    );
+
+    // NIP-04 format: base64(ciphertext)?iv=base64(iv)
+    const ciphertextBase64 = btoa(String.fromCharCode(...new Uint8Array(ciphertext)));
+    const ivBase64 = btoa(String.fromCharCode(...iv));
+
+    return `${ciphertextBase64}?iv=${ivBase64}`;
+  }
+
+  /**
+   * NIP-04 decryption using AES-256-CBC
+   */
+  static async nip04Decrypt(
+    ciphertext: string,
+    senderPubkey: string,
+    recipientPrivateKey: Uint8Array
+  ): Promise<string> {
+    // Parse NIP-04 format
+    const parts = ciphertext.split('?iv=');
+    if (parts.length !== 2) {
+      throw new NostrProtocolError('INVALID_CIPHERTEXT', 'Invalid NIP-04 format');
+    }
+
+    const [ciphertextBase64, ivBase64] = parts;
+    const ciphertextBytes = new Uint8Array(
+      atob(ciphertextBase64).split('').map(c => c.charCodeAt(0))
+    );
+    const iv = new Uint8Array(
+      atob(ivBase64).split('').map(c => c.charCodeAt(0))
+    );
+
+    const senderPubkeyData = hexToBytes(senderPubkey);
+    const sharedSecret = this.deriveSharedSecret(recipientPrivateKey, senderPubkeyData);
+
+    const key = await crypto.subtle.importKey(
+      'raw',
+      sharedSecret.buffer as ArrayBuffer,
+      { name: 'AES-CBC' },
+      false,
+      ['decrypt']
+    );
+
+    const plaintext = await crypto.subtle.decrypt(
+      { name: 'AES-CBC', iv },
+      key,
+      ciphertextBytes
+    );
+
+    return new TextDecoder().decode(plaintext);
   }
 
   // MARK: - Private Methods
