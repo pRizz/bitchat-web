@@ -11,8 +11,9 @@ import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
 export enum NostrEventKind {
   Metadata = 0,
   TextNote = 1,
-  DM = 14, // NIP-17 DM rumor kind
+  EncryptedDM = 4, // NIP-04 legacy encrypted DM
   Seal = 13, // NIP-17 sealed event
+  DM = 14, // NIP-17 DM rumor kind
   GiftWrap = 1059, // NIP-59 gift wrap
   EphemeralEvent = 20000,
   GeohashPresence = 20001,

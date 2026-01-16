@@ -2,12 +2,13 @@
  * NostrRelayManager - WebSocket relay connection manager
  *
  * Handles connections to multiple Nostr relays with automatic reconnection,
- * subscription management, and message routing.
+ * subscription management, message routing, and deduplication.
  *
  * Matches the Swift implementation in NostrRelayManager.swift
  */
 
 import type { NostrEventData } from '@/crypto/nostr';
+import { messageDeduplicationService } from '@/services/MessageDeduplicationService';
 
 export type RelayStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
@@ -205,6 +206,12 @@ export class NostrRelayManager {
       switch (message[0]) {
         case 'EVENT': {
           const [, subId, event] = message;
+
+          // Deduplicate - skip if we've already seen this event
+          if (!messageDeduplicationService.processEvent(event)) {
+            return;
+          }
+
           const sub = this.subscriptions.get(subId);
           if (sub) {
             sub.onEvent(event);
