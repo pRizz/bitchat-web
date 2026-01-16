@@ -1,9 +1,15 @@
 /**
  * Chat store - manages messages and conversations
+ *
+ * Integrates with IndexedDB storage for persistence:
+ * - Messages are stored on add
+ * - Conversations are loaded on init
+ * - Unread counts sync with storage
  */
 
 import { create } from 'zustand';
 import type { BitchatMessage } from '@/types';
+import * as storage from '@/storage';
 
 interface Conversation {
   peerId: string;
@@ -20,7 +26,11 @@ interface ChatState {
   // Currently selected peer
   activePeerId: string | null;
 
+  // Loading state
+  initialized: boolean;
+
   // Actions
+  initialize: () => Promise<void>;
   setActivePeer: (peerId: string | null) => void;
   addMessage: (peerId: string, message: BitchatMessage) => void;
   markAsRead: (peerId: string) => void;
@@ -28,6 +38,7 @@ interface ChatState {
   getOrCreateConversation: (peerId: string) => Conversation;
   updatePeerNickname: (peerId: string, nickname: string) => void;
   clearConversation: (peerId: string) => void;
+  clearAll: () => Promise<void>;
 }
 
 const MAX_MESSAGES_PER_CONVERSATION = 1337; // Match Swift implementation
@@ -35,6 +46,37 @@ const MAX_MESSAGES_PER_CONVERSATION = 1337; // Match Swift implementation
 export const useChatStore = create<ChatState>()((set, get) => ({
   conversations: new Map(),
   activePeerId: null,
+  initialized: false,
+
+  initialize: async () => {
+    if (get().initialized) return;
+
+    try {
+      // Load conversations from storage
+      const storedConversations = await storage.getConversations();
+      const conversations = new Map<string, Conversation>();
+
+      // Load messages for each conversation
+      for (const stored of storedConversations) {
+        const messages = await storage.getMessages(stored.peerId, {
+          limit: MAX_MESSAGES_PER_CONVERSATION,
+        });
+
+        conversations.set(stored.peerId, {
+          peerId: stored.peerId,
+          peerNickname: stored.peerNickname,
+          messages,
+          unreadCount: stored.unreadCount,
+          lastMessageAt: stored.lastMessageAt,
+        });
+      }
+
+      set({ conversations, initialized: true });
+    } catch (error) {
+      console.error('[ChatStore] Failed to initialize from storage:', error);
+      set({ initialized: true }); // Continue with empty state
+    }
+  },
 
   setActivePeer: (peerId: string | null) => {
     set({ activePeerId: peerId });
@@ -44,6 +86,11 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   },
 
   addMessage: (peerId: string, message: BitchatMessage) => {
+    // Persist to storage (fire and forget, but log errors)
+    storage.storeMessage(peerId, message).catch((err) => {
+      console.error('[ChatStore] Failed to persist message:', err);
+    });
+
     set((state) => {
       const conversations = new Map(state.conversations);
       const existing = conversations.get(peerId) || {
@@ -62,11 +109,19 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       // Update unread count if not active conversation
       const isActive = state.activePeerId === peerId;
       const isOwnMessage = message.senderPubkey === peerId ? false : true; // TODO: compare with own pubkey
+      const newUnread = isActive || isOwnMessage ? existing.unreadCount : existing.unreadCount + 1;
+
+      // Persist unread count change
+      if (newUnread !== existing.unreadCount) {
+        storage.updateUnreadCount(peerId, newUnread).catch((err) => {
+          console.error('[ChatStore] Failed to update unread count:', err);
+        });
+      }
 
       conversations.set(peerId, {
         ...existing,
         messages,
-        unreadCount: isActive || isOwnMessage ? existing.unreadCount : existing.unreadCount + 1,
+        unreadCount: newUnread,
         lastMessageAt: message.timestamp,
       });
 
@@ -79,6 +134,10 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       const conversations = new Map(state.conversations);
       const existing = conversations.get(peerId);
       if (existing && existing.unreadCount > 0) {
+        // Persist to storage
+        storage.markAsRead(peerId).catch((err) => {
+          console.error('[ChatStore] Failed to mark as read:', err);
+        });
         conversations.set(peerId, { ...existing, unreadCount: 0 });
         return { conversations };
       }
@@ -111,6 +170,11 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   },
 
   updatePeerNickname: (peerId: string, nickname: string) => {
+    // Persist to storage
+    storage.updateConversationNickname(peerId, nickname).catch((err) => {
+      console.error('[ChatStore] Failed to update nickname:', err);
+    });
+
     set((state) => {
       const conversations = new Map(state.conversations);
       const existing = conversations.get(peerId);
@@ -123,11 +187,21 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   },
 
   clearConversation: (peerId: string) => {
+    // Delete from storage
+    storage.deleteConversation(peerId).catch((err) => {
+      console.error('[ChatStore] Failed to delete conversation:', err);
+    });
+
     set((state) => {
       const conversations = new Map(state.conversations);
       conversations.delete(peerId);
       return { conversations };
     });
+  },
+
+  clearAll: async () => {
+    await storage.clearAllMessages();
+    set({ conversations: new Map(), activePeerId: null });
   },
 }));
 

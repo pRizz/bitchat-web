@@ -1,11 +1,15 @@
 /**
  * Settings store - manages user preferences and identity
+ *
+ * Initializes the storage layer and coordinates with chat store
  */
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { NostrIdentity } from '@/types';
 import { keyManager } from '@/crypto';
+import { initializeStorage, wipeAllData } from '@/storage';
+import { useChatStore } from './useChatStore';
 
 interface SettingsState {
   // Identity
@@ -24,6 +28,7 @@ interface SettingsState {
   importIdentity: (nsec: string) => Promise<void>;
   exportIdentity: () => Promise<string>;
   deleteIdentity: () => Promise<void>;
+  wipeAllData: () => Promise<void>;
 }
 
 const DEFAULT_RELAYS = [
@@ -45,11 +50,18 @@ export const useSettingsStore = create<SettingsState>()(
         if (get().initialized) return;
 
         try {
+          // Initialize storage layer first
+          await initializeStorage();
+
+          // Initialize identity
           await keyManager.initialize();
           const identity = await keyManager.getOrCreateNostrIdentity();
           set({ identity, initialized: true });
+
+          // Initialize chat store (load persisted messages)
+          await useChatStore.getState().initialize();
         } catch (error) {
-          console.error('Failed to initialize identity:', error);
+          console.error('Failed to initialize:', error);
           throw error;
         }
       },
@@ -83,6 +95,12 @@ export const useSettingsStore = create<SettingsState>()(
       deleteIdentity: async () => {
         await keyManager.deleteAllKeys();
         set({ identity: null, initialized: false });
+      },
+
+      wipeAllData: async () => {
+        await wipeAllData();
+        await useChatStore.getState().clearAll();
+        set({ identity: null, nickname: '', initialized: false, relays: DEFAULT_RELAYS });
       },
     }),
     {
