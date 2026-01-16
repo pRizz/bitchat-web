@@ -11,6 +11,15 @@ import { keyManager } from '@/crypto';
 import { initializeStorage, wipeAllData } from '@/storage';
 import { useChatStore } from './useChatStore';
 
+export type Theme = 'dark' | 'light' | 'system';
+export type PerformanceMode = 'balanced' | 'battery_saver' | 'performance';
+
+interface PrivacySettings {
+  showReadReceipts: boolean;
+  showTypingIndicators: boolean;
+  sharePresence: boolean;
+}
+
 interface SettingsState {
   // Identity
   identity: NostrIdentity | null;
@@ -20,11 +29,23 @@ interface SettingsState {
   // Relays
   relays: string[];
 
+  // Appearance
+  theme: Theme;
+
+  // Privacy
+  privacy: PrivacySettings;
+
+  // Performance
+  performanceMode: PerformanceMode;
+
   // Actions
   initialize: () => Promise<void>;
   setNickname: (nickname: string) => void;
   addRelay: (url: string) => void;
   removeRelay: (url: string) => void;
+  setTheme: (theme: Theme) => void;
+  setPrivacy: (privacy: Partial<PrivacySettings>) => void;
+  setPerformanceMode: (mode: PerformanceMode) => void;
   importIdentity: (nsec: string) => Promise<void>;
   exportIdentity: () => Promise<string>;
   deleteIdentity: () => Promise<void>;
@@ -38,6 +59,12 @@ const DEFAULT_RELAYS = [
   'wss://nostr.wine',
 ];
 
+const DEFAULT_PRIVACY: PrivacySettings = {
+  showReadReceipts: true,
+  showTypingIndicators: true,
+  sharePresence: true,
+};
+
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set, get) => ({
@@ -45,6 +72,9 @@ export const useSettingsStore = create<SettingsState>()(
       nickname: '',
       initialized: false,
       relays: DEFAULT_RELAYS,
+      theme: 'dark',
+      privacy: DEFAULT_PRIVACY,
+      performanceMode: 'balanced',
 
       initialize: async () => {
         if (get().initialized) return;
@@ -82,6 +112,29 @@ export const useSettingsStore = create<SettingsState>()(
         set({ relays: relays.filter(r => r !== url) });
       },
 
+      setTheme: (theme: Theme) => {
+        set({ theme });
+        // Apply theme to document
+        if (theme === 'system') {
+          const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          document.documentElement.classList.toggle('dark', prefersDark);
+          document.documentElement.classList.toggle('light', !prefersDark);
+        } else {
+          document.documentElement.classList.toggle('dark', theme === 'dark');
+          document.documentElement.classList.toggle('light', theme === 'light');
+        }
+      },
+
+      setPrivacy: (privacy: Partial<PrivacySettings>) => {
+        set((state) => ({
+          privacy: { ...state.privacy, ...privacy },
+        }));
+      },
+
+      setPerformanceMode: (mode: PerformanceMode) => {
+        set({ performanceMode: mode });
+      },
+
       importIdentity: async (nsec: string) => {
         await keyManager.initialize();
         const identity = await keyManager.importNostrIdentity(nsec);
@@ -100,7 +153,15 @@ export const useSettingsStore = create<SettingsState>()(
       wipeAllData: async () => {
         await wipeAllData();
         await useChatStore.getState().clearAll();
-        set({ identity: null, nickname: '', initialized: false, relays: DEFAULT_RELAYS });
+        set({
+          identity: null,
+          nickname: '',
+          initialized: false,
+          relays: DEFAULT_RELAYS,
+          theme: 'dark',
+          privacy: DEFAULT_PRIVACY,
+          performanceMode: 'balanced',
+        });
       },
     }),
     {
@@ -108,6 +169,9 @@ export const useSettingsStore = create<SettingsState>()(
       partialize: (state) => ({
         nickname: state.nickname,
         relays: state.relays,
+        theme: state.theme,
+        privacy: state.privacy,
+        performanceMode: state.performanceMode,
       }),
     }
   )
