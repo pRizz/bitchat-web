@@ -20,6 +20,26 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 
+# Nostr dependencies
+nostr-sdk = { version = "0.35", default-features = false, features = ["nip04", "nip17", "nip44", "nip59"] }
+nostr = { version = "0.35", default-features = false, features = ["std"] }
+
+# Async runtime
+futures = "0.3"
+async-trait = "0.1"
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# State management
+parking_lot = "0.12"
+once_cell = "1"
+
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"
 
