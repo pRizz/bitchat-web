@@ -4,7 +4,13 @@ import { useChatStore, useConversationList } from '@/store/useChatStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { useRelayStore } from '@/store/useRelayStore';
 import { privateChatService } from '@/services/PrivateChatService';
-import type { BitchatMessage } from '@/types';
+import {
+  MessageBubble,
+  MessageInput,
+  TypingIndicator,
+  ConversationList,
+  ChatHeader
+} from '@/components/chat';
 
 export default function PrivateTab() {
   const { peerId } = useParams<{ peerId?: string }>();
@@ -15,11 +21,8 @@ export default function PrivateTab() {
   const conversations = useConversationList();
   const { setActivePeer, getOrCreateConversation } = useChatStore();
 
-  const [message, setMessage] = useState('');
-  const [newChatPubkey, setNewChatPubkey] = useState('');
-  const [showNewChat, setShowNewChat] = useState(false);
-  const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [peerTyping, setPeerTyping] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -46,6 +49,7 @@ export default function PrivateTab() {
   // Set active peer when route changes
   useEffect(() => {
     setActivePeer(peerId || null);
+    setPeerTyping(false); // Reset typing indicator on peer change
   }, [peerId, setActivePeer]);
 
   // Scroll to bottom when messages change
@@ -53,170 +57,92 @@ export default function PrivateTab() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeConversation?.messages]);
 
-  const handleSend = async () => {
-    if (!message.trim() || !peerId || sending) return;
+  const handleSend = async (message: string) => {
+    if (!peerId) return;
 
-    setSending(true);
     setError(null);
 
     try {
-      await privateChatService.sendMessage(peerId, message.trim());
-      setMessage('');
+      await privateChatService.sendMessage(peerId, message);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send');
-    } finally {
-      setSending(false);
+      throw err; // Re-throw so MessageInput knows it failed
     }
   };
 
-  const handleNewChat = () => {
-    const pubkey = privateChatService.validatePubkey(newChatPubkey.trim());
-    if (pubkey) {
-      getOrCreateConversation(pubkey);
-      setNewChatPubkey('');
-      setShowNewChat(false);
-      navigate(`/private/${pubkey}`);
+  const handleNewChat = (pubkey: string) => {
+    const validPubkey = privateChatService.validatePubkey(pubkey);
+    if (validPubkey) {
+      getOrCreateConversation(validPubkey);
+      navigate(`/private/${validPubkey}`);
     } else {
       setError('Invalid pubkey or npub');
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
+  const handleSelectConversation = (selectedPeerId: string) => {
+    navigate(`/private/${selectedPeerId}`);
   };
 
-  const formatPubkey = (pubkey: string) => {
-    return pubkey.slice(0, 8) + '...' + pubkey.slice(-4);
+  const handleTypingChange = (_isTyping: boolean) => {
+    // TODO: Send typing indicator to peer when NIP-XX is implemented
   };
 
   return (
     <div className="flex-1 flex">
       {/* Conversation List Sidebar */}
-      <div className="w-64 bg-gray-800 border-r border-gray-700 flex flex-col">
-        <div className="p-4 border-b border-gray-700">
-          <button
-            onClick={() => setShowNewChat(true)}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition-colors text-sm"
-          >
-            + New Conversation
-          </button>
-        </div>
-
-        {/* New Chat Modal */}
-        {showNewChat && (
-          <div className="p-4 bg-gray-700 border-b border-gray-600">
-            <input
-              type="text"
-              value={newChatPubkey}
-              onChange={(e) => setNewChatPubkey(e.target.value)}
-              placeholder="Enter npub or hex pubkey..."
-              className="w-full bg-gray-600 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 mb-2"
-            />
-            <div className="flex space-x-2">
-              <button
-                onClick={handleNewChat}
-                className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded text-sm"
-              >
-                Start
-              </button>
-              <button
-                onClick={() => setShowNewChat(false)}
-                className="px-3 py-1 text-gray-400 hover:text-white text-sm"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Conversation List */}
-        <div className="flex-1 overflow-y-auto">
-          {conversations.length === 0 ? (
-            <div className="p-4 text-center text-gray-500 text-sm">
-              No conversations yet
-            </div>
-          ) : (
-            conversations.map((conv) => (
-              <button
-                key={conv.peerId}
-                onClick={() => navigate(`/private/${conv.peerId}`)}
-                className={`w-full p-4 text-left hover:bg-gray-700 transition-colors ${
-                  peerId === conv.peerId ? 'bg-gray-700' : ''
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium truncate">
-                    {conv.peerNickname || formatPubkey(conv.peerId)}
-                  </span>
-                  {conv.unreadCount > 0 && (
-                    <span className="bg-indigo-600 text-white text-xs px-2 py-0.5 rounded-full">
-                      {conv.unreadCount}
-                    </span>
-                  )}
-                </div>
-                {conv.messages.length > 0 && (
-                  <p className="text-xs text-gray-400 truncate mt-1">
-                    {conv.messages[conv.messages.length - 1].content}
-                  </p>
-                )}
-              </button>
-            ))
-          )}
-        </div>
-      </div>
+      <ConversationList
+        conversations={conversations}
+        activePeerId={peerId || null}
+        onSelect={handleSelectConversation}
+        onNewChat={handleNewChat}
+      />
 
       {/* Chat Area */}
       <div className="flex-1 flex flex-col">
         {/* Header */}
-        <header className="h-14 bg-gray-800 border-b border-gray-700 flex items-center px-4">
-          {peerId ? (
-            <>
-              <div className="flex-1">
-                <h1 className="text-lg font-semibold">
-                  {activeConversation?.peerNickname || formatPubkey(peerId)}
-                </h1>
-                <p className="text-xs text-gray-400">{formatPubkey(peerId)}</p>
-              </div>
-              <span className="text-xs text-green-400 flex items-center">
-                <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
-                </svg>
-                E2E Encrypted
-              </span>
-            </>
-          ) : (
-            <h1 className="text-lg font-semibold">Private Messages</h1>
-          )}
-        </header>
+        <ChatHeader
+          peerId={peerId || null}
+          peerNickname={activeConversation?.peerNickname}
+          encryptionStatus="secured"
+          isTyping={peerTyping}
+        />
 
         {/* Messages area */}
         <div className="flex-1 overflow-y-auto p-4">
           {!peerId ? (
-            <div className="text-center text-gray-500 mt-8">
+            <div className="flex flex-col items-center justify-center h-full text-gray-500">
+              <svg className="w-16 h-16 mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
               <p className="text-lg mb-2">Select a conversation</p>
               <p className="text-sm">
                 Or start a new one by entering a Nostr public key
               </p>
             </div>
           ) : activeConversation?.messages.length === 0 ? (
-            <div className="text-center text-gray-500 mt-8">
+            <div className="flex flex-col items-center justify-center h-full text-gray-500">
+              <svg className="w-16 h-16 mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
               <p className="text-lg mb-2">No messages yet</p>
               <p className="text-sm">
                 Send a message to start the conversation
               </p>
             </div>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-3">
               {activeConversation?.messages.map((msg) => (
                 <MessageBubble
                   key={msg.id}
                   message={msg}
                   isOwn={msg.senderPubkey === identity?.publicKeyHex}
+                  status="sent"
                 />
               ))}
+              {peerTyping && (
+                <TypingIndicator peerName={activeConversation?.peerNickname} />
+              )}
               <div ref={messagesEndRef} />
             </div>
           )}
@@ -224,75 +150,26 @@ export default function PrivateTab() {
 
         {/* Error display */}
         {error && (
-          <div className="px-4 py-2 bg-red-900/50 text-red-300 text-sm">
-            {error}
+          <div className="px-4 py-2 bg-red-900/50 text-red-300 text-sm flex items-center justify-between">
+            <span>{error}</span>
+            <button
+              onClick={() => setError(null)}
+              className="text-red-400 hover:text-red-200"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
         )}
 
         {/* Message input */}
         {peerId && (
-          <div className="p-4 bg-gray-800 border-t border-gray-700">
-            <div className="flex space-x-2">
-              <input
-                type="text"
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                onKeyPress={handleKeyPress}
-                placeholder="Type a message..."
-                disabled={sending}
-                className="flex-1 bg-gray-700 text-white rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
-              />
-              <button
-                onClick={handleSend}
-                disabled={!message.trim() || sending}
-                className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg transition-colors"
-              >
-                {sending ? 'Sending...' : 'Send'}
-              </button>
-            </div>
-          </div>
+          <MessageInput
+            onSend={handleSend}
+            onTypingChange={handleTypingChange}
+          />
         )}
-      </div>
-    </div>
-  );
-}
-
-// Message bubble component
-function MessageBubble({
-  message,
-  isOwn,
-}: {
-  message: BitchatMessage;
-  isOwn: boolean;
-}) {
-  const formatTime = (timestamp: number) => {
-    const date = new Date(timestamp * 1000);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
-
-  return (
-    <div className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
-      <div
-        className={`max-w-[70%] rounded-lg px-4 py-2 ${
-          isOwn
-            ? 'bg-indigo-600 text-white'
-            : 'bg-gray-700 text-white'
-        }`}
-      >
-        {!isOwn && message.senderNickname && (
-          <p className="text-xs text-gray-300 mb-1">{message.senderNickname}</p>
-        )}
-        <p className="break-words">{message.content}</p>
-        <div className={`flex items-center justify-end mt-1 space-x-1 ${
-          isOwn ? 'text-indigo-200' : 'text-gray-400'
-        }`}>
-          <span className="text-xs">{formatTime(message.timestamp)}</span>
-          {message.encrypted && (
-            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
-            </svg>
-          )}
-        </div>
       </div>
     </div>
   );
