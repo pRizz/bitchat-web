@@ -9,6 +9,8 @@ export { NoiseCipherState } from './NoiseCipherState';
 export { NoiseSymmetricState } from './NoiseSymmetricState';
 export { NoiseHandshakeState } from './NoiseHandshakeState';
 export type { NoiseHandshakeConfig, NoiseTransportKeys } from './NoiseHandshakeState';
+export { NoiseSession, createSessionPair } from './NoiseSession';
+export type { NoiseSessionConfig, NoiseSessionState } from './NoiseSession';
 export {
   NoiseError,
   createProtocolName,
